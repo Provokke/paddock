@@ -45,6 +45,7 @@ export type BuildMode = typeof(setmetatable(
 		dragRotation: number,
 		dragOffsetX: number, -- piece corner minus the cell grabbed, so a bare click moves nothing
 		dragOffsetZ: number,
+		dragLift: number, -- how far above the plot the piece was grabbed; the drag tracks that height
 		coins: number,
 		cellSize: number,
 		plotIndex: number?,
@@ -69,7 +70,7 @@ local KEYS: { Enum.KeyCode } = {
 	Enum.KeyCode.Eight,
 	Enum.KeyCode.Nine,
 }
-local HINT = "R rotate   X sell   Z undo   Esc deselect   Click a piece to select, drag to move"
+local HINT = "R rotate   X sell   Z undo   Q cancel   Click a piece to select, drag to move"
 local NO_PLOT = "All plots are taken, you can look around"
 
 function BuildMode.new(deps: Deps): BuildMode
@@ -100,7 +101,11 @@ function BuildMode.new(deps: Deps): BuildMode
 	hotbar.Parent = deps.parent
 	theme.style(hotbar, theme.panel)
 
-	local hint = theme.label(deps.parent, HINT, 14, theme.muted)
+	-- The hint sits over the world, so it gets full-strength text and a dark stroke to stay readable
+	-- against bright grass and gravel.
+	local hint = theme.label(deps.parent, HINT, 14, theme.text)
+	hint.TextStrokeColor3 = Color3.new(0, 0, 0)
+	hint.TextStrokeTransparency = 0.45
 	hint.Name = "Hint"
 	hint.AnchorPoint = Vector2.new(0.5, 1)
 	hint.Position = UDim2.new(0.5, 0, 1, -16 - SLOT_H - SLOT_GAP * 2 - 6)
@@ -141,6 +146,9 @@ function BuildMode.new(deps: Deps): BuildMode
 	highlight.FillTransparency = 0.7
 	highlight.OutlineColor = theme.accent
 	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	-- A Highlight with no Adornee lights up its parent, which here is the whole world, so it stays
+	-- off until a piece is selected.
+	highlight.Enabled = false
 	highlight.Parent = deps.world
 
 	local self = setmetatable({
@@ -162,6 +170,7 @@ function BuildMode.new(deps: Deps): BuildMode
 		dragRotation = 0,
 		dragOffsetX = 0,
 		dragOffsetZ = 0,
+		dragLift = 0,
 		coins = 0,
 		cellSize = 4,
 		plotIndex = nil,
@@ -314,8 +323,10 @@ local function plotPartOf(self: BuildMode): BasePart?
 	return part
 end
 
--- The cell under the mouse, found by meeting the mouse ray with the plot's top face.
-local function cellUnderMouse(self: BuildMode): (number?, number?)
+-- The cell under the mouse, found by meeting the mouse ray with the plot's top face, or with a
+-- plane `lift` studs above it. A drag uses the height the piece was grabbed at, so grabbing a shed
+-- by its roof keeps the roof under the cursor instead of the ground behind it.
+local function cellUnderMouse(self: BuildMode, lift: number?): (number?, number?)
 	local camera, plot = self.deps.camera(), plotPartOf(self)
 	if camera == nil or plot == nil then
 		return nil, nil
@@ -327,7 +338,7 @@ local function cellUnderMouse(self: BuildMode): (number?, number?)
 	if math.abs(denom) < 1e-6 then
 		return nil, nil
 	end
-	local top = plot.CFrame.Position + up * (plot.Size.Y / 2)
+	local top = plot.CFrame.Position + up * (plot.Size.Y / 2 + (lift or 0))
 	local t = (top - ray.Origin):Dot(up) / denom
 	if t <= 0 then
 		return nil, nil
@@ -379,7 +390,7 @@ local function currentCell(self: BuildMode): (string?, Cell?)
 		return nil
 	end
 	local def = self.deps.defs[id]
-	local x, z = cellUnderMouse(self)
+	local x, z = cellUnderMouse(self, if moving ~= nil then self.dragLift else 0)
 	if x == nil or z == nil then
 		return nil
 	end
@@ -446,10 +457,11 @@ function BuildMode.tick(self: BuildMode)
 			self.highlight.Adornee = modelOf(self, uid)
 		end
 	end
+	self.highlight.Enabled = uid ~= nil and self.highlight.Adornee ~= nil
 end
 
--- The piece under the mouse, if it is on the player's own plot.
-local function pieceUnderMouse(self: BuildMode): number?
+-- The piece under the mouse, if it is on the player's own plot, and where the ray met it.
+local function pieceUnderMouse(self: BuildMode): (number?, Vector3?)
 	local camera, builds = self.deps.camera(), self.deps.builds()
 	if camera == nil or builds == nil or self.plotIndex == nil then
 		return nil
@@ -468,7 +480,7 @@ local function pieceUnderMouse(self: BuildMode): number?
 	while node ~= nil and node ~= builds do
 		local uid = node:GetAttribute("PaddockUid")
 		if type(uid) == "number" and node.Parent == folder and self.pieces[uid] ~= nil then
-			return uid
+			return uid, result.Position
 		end
 		node = node.Parent
 	end
@@ -500,14 +512,21 @@ local function leftClick(self: BuildMode)
 		end
 		return
 	end
-	local uid = pieceUnderMouse(self)
+	local uid, hitAt = pieceUnderMouse(self)
 	if uid == nil then
 		self.selectedUid = nil
 		self.highlight.Adornee = nil
 	elseif uid == self.selectedUid then
 		local piece = self.pieces[uid] :: Piece
-		local gx, gz = cellUnderMouse(self)
+		local plot = plotPartOf(self)
+		local lift = 0
+		if plot ~= nil and hitAt ~= nil then
+			local top = plot.CFrame.Position + plot.CFrame.UpVector * (plot.Size.Y / 2)
+			lift = math.max(0, (hitAt - top):Dot(plot.CFrame.UpVector))
+		end
+		local gx, gz = cellUnderMouse(self, lift)
 		if gx ~= nil and gz ~= nil then
+			self.dragLift = lift
 			self.dragging = true
 			self.dragRotation = piece.r
 			self.dragOffsetX, self.dragOffsetZ = piece.x - gx, piece.z - gz
@@ -518,8 +537,9 @@ local function leftClick(self: BuildMode)
 	end
 end
 
--- Esc steps back one level: a drag, then a selection.
-local function escape(self: BuildMode)
+-- Q steps back one level: a drag, then a selection. Not Esc: on Roblox, Esc opens the
+-- system menu, which then swallows every click until it is closed.
+local function cancel(self: BuildMode)
 	if self.dragging then
 		finishDrag(self, false)
 	elseif self.item ~= nil or self.selectedUid ~= nil then
@@ -529,10 +549,6 @@ end
 
 function BuildMode.inputBegan(self: BuildMode, input: InputObject, processed: boolean)
 	local key = input.KeyCode
-	if input.UserInputType == Enum.UserInputType.Keyboard and key == Enum.KeyCode.Escape then
-		escape(self) -- the engine marks Esc as handled, so this one ignores `processed`
-		return
-	end
 	if processed then
 		return
 	end
@@ -549,6 +565,8 @@ function BuildMode.inputBegan(self: BuildMode, input: InputObject, processed: bo
 		self:toggle()
 	elseif not self.active or not self.hasPlot then
 		return
+	elseif key == Enum.KeyCode.Q then
+		cancel(self)
 	elseif key == Enum.KeyCode.R then
 		if self.dragging then
 			self.dragRotation = (self.dragRotation + 1) % 4
