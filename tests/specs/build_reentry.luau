@@ -104,12 +104,16 @@ local function interleave(r: Rig, fns: { () -> (any, any) }, order: { number }):
 	local before = r.wallet.yields
 	r.wallet.armed = true
 	local threads = {}
+	local results = {}
 	for i, fn in fns do
 		threads[i] = coroutine.create(fn)
-		local ok, err = coroutine.resume(threads[i])
-		assert(ok, tostring(err))
+		local ok, a, b = coroutine.resume(threads[i])
+		assert(ok, tostring(a))
+		-- A call that never reaches the wallet finishes here, on its first resume.
+		if coroutine.status(threads[i]) == "dead" then
+			results[i] = { a, b }
+		end
 	end
-	local results = {}
 	for _, i in order do
 		local thread = threads[i]
 		while coroutine.status(thread) ~= "dead" do

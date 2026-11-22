@@ -184,7 +184,9 @@ function Build.undo(self: Build): (string?, string?)
 
 	local layout, wallet = deps.layout, deps.wallet
 	local function refuse(why: string?): (string?, string?)
-		table.insert(history, entry)
+		-- Through push, so actions made while this undo was waiting on the wallet can't leave the
+		-- history longer than UndoDepth.
+		push(self, entry)
 		return nil, why
 	end
 
