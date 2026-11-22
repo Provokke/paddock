@@ -102,7 +102,7 @@ return {
 			arrive(w, 1, "first")
 			local old = w.sessions.live[1]
 			assert(old ~= nil)
-			old.data.gold = 7
+			old.data.coins = 7
 			parkNextCall(w, 5)
 			depart(w, 1) -- the release is now parked mid-call
 			arrive(w, 1, "second")
@@ -111,7 +111,7 @@ return {
 			w.sched:advance(6)
 			local new = w.sessions.live[1]
 			assert(new ~= nil and new ~= old, "the rejoin has its own session")
-			assert(new.data.gold == 7, "holding what the old session wrote")
+			assert(new.data.coins == 7, "holding what the old session wrote")
 			assert(w.records.Player_1.lease.owner == new.owner)
 			assert(#w.kicks == 0, w.kicks[1])
 			-- control: with nothing in flight, a rejoin loads straight away
@@ -135,8 +135,8 @@ return {
 			local session = w.sessions.live[1]
 			assert(session ~= nil, "the second join has a session")
 			assert(w.records.Player_1.lease.owner == session.owner, "and holds the lease")
-			session.data.gold = 3
-			assert(session:save() == true and w.records.Player_1.data.gold == 3)
+			session.data.coins = 3
+			assert(session:save() == true and w.records.Player_1.data.coins == 3)
 			assert(#w.kicks == 0, w.kicks[1])
 		end,
 	},
@@ -192,8 +192,8 @@ return {
 			local w = world()
 			arrive(w, 1, "a")
 			arrive(w, 2, "b")
-			w.sessions.live[1].data.gold = 1
-			w.sessions.live[2].data.gold = 2
+			w.sessions.live[1].data.coins = 1
+			w.sessions.live[2].data.coins = 2
 			parkNextCall(w, 100) -- one release hangs
 			local closedAt: number? = nil
 			w.sched:spawn(function()

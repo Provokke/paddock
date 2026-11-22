@@ -1,7 +1,7 @@
 --!strict
 -- Grid maths with no Roblox types, so the server, the client's mouse-to-cell code and the tests
--- all share one set of formulas. Cells are 0-based from the plot's min corner, which is also the
--- plot's local origin.
+-- all share one set of formulas. Cells are 0-based and count from the plot's min corner; the
+-- plot part's CFrame is at its centre, which is what Grid.pivot measures from.
 local Grid = {}
 
 -- The footprint in cells after turning a piece r quarter turns. Odd turns swap width and depth.

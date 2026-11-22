@@ -22,8 +22,8 @@ return {
 			assert(third ~= nil and outcome3 == "taken", outcome3)
 			assert(third.owner ~= first.owner, "a new session gets a new owner")
 			assert(records.p1.lease.owner == third.owner)
-			third.data.gold = 9
-			assert(third:save() == true and records.p1.data.gold == 9)
+			third.data.coins = 9
+			assert(third:save() == true and records.p1.data.coins == 9)
 		end,
 	},
 	{
@@ -62,13 +62,13 @@ return {
 			local store, ds, waits = server(records, FakeClock.new(0), "JOB")
 			local session = store:load("p1")
 			assert(session ~= nil)
-			session.data.gold = 8
+			session.data.coins = 8
 			ds:failNext(5, "503 service unavailable")
 			assert(session:release() == true, "the sixth attempt lands")
 			assert(ds.calls == 7, `load plus six release attempts, got {ds.calls}`)
 			local w = table.concat(waits, ",")
 			assert(w == "1,2,4,8,16", `waits were {w}`)
-			assert(records.p1.lease == nil and records.p1.data.gold == 8, "data written, lease handed back")
+			assert(records.p1.lease == nil and records.p1.data.coins == 8, "data written, lease handed back")
 		end,
 	},
 	{
@@ -78,7 +78,7 @@ return {
 			local store, ds, waits = server(records, FakeClock.new(0), "JOB")
 			local session = store:load("p1")
 			assert(session ~= nil)
-			session.data.gold = 8
+			session.data.coins = 8
 			ds:failNext(100, "503 service unavailable")
 			assert(session:release() == false)
 			local w = table.concat(waits, ",")
@@ -88,7 +88,7 @@ return {
 			-- control: once the outage is over, releasing again lands
 			ds:failNext(0, "")
 			assert(session:release() == true)
-			assert(records.p1.lease == nil and records.p1.data.gold == 8)
+			assert(records.p1.lease == nil and records.p1.data.coins == 8)
 		end,
 	},
 	{
@@ -112,11 +112,11 @@ return {
 			local store, ds, _waits, logs = server(records, FakeClock.new(0), "JOB")
 			local session = store:load("p1")
 			assert(session ~= nil)
-			session.data.gold = 6
+			session.data.coins = 6
 			ds:commitThenFailNext(1, "timed out")
 			assert(session:release() == true, "the retry sees our own release")
 			assert(session.released == true and session.lost == false)
-			assert(records.p1.lease == nil and records.p1.data.gold == 6)
+			assert(records.p1.lease == nil and records.p1.data.coins == 6)
 			assert(records.p1.releasedBy == session.owner)
 			for _, line in logs do
 				assert(not string.find(line, "lease lost", 1, true), line)
@@ -135,11 +135,11 @@ return {
 			clock:advance(181)
 			local b = storeB:load("p1")
 			assert(b ~= nil)
-			b.data.gold = 50
+			b.data.coins = 50
 			assert(b:save() == true)
-			a.data.gold = 999
+			a.data.coins = 999
 			assert(a:release() == false and a.lost == true)
-			assert(records.p1.data.gold == 50 and records.p1.lease.owner == b.owner)
+			assert(records.p1.data.coins == 50 and records.p1.lease.owner == b.owner)
 			-- control: B's own release lands
 			assert(b:release() == true and records.p1.lease == nil)
 		end,

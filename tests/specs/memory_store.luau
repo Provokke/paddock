@@ -6,18 +6,18 @@ return {
 		name = "UpdateAsync stores a copy, so later edits to the original don't leak in",
 		run = function()
 			local store = MemoryStore.new()
-			local value = { gold = 1, nested = { n = 1 } }
+			local value = { coins = 1, nested = { n = 1 } }
 			store:UpdateAsync("k", function()
 				return value
 			end)
-			value.gold = 99
+			value.coins = 99
 			value.nested.n = 99
 			local seen: any
 			store:UpdateAsync("k", function(current: any)
 				seen = current
 				return nil
 			end)
-			assert(seen.gold == 1 and seen.nested.n == 1, "stored data should be unaffected")
+			assert(seen.coins == 1 and seen.nested.n == 1, "stored data should be unaffected")
 		end,
 	},
 	{

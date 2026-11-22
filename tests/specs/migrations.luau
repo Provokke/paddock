@@ -4,12 +4,12 @@ local Migrations = require("../../src/server/Data/Migrations")
 
 local steps = {
 	function(data: any)
-		data.coins = 0
+		data.pieces = {}
 		return data
 	end,
 	function(data: any)
-		data.gold = data.coins
-		data.coins = nil
+		data.layout = data.pieces
+		data.pieces = nil
 		return data
 	end,
 }
@@ -21,17 +21,17 @@ return {
 			local data, readOnly =
 				Migrations.run({ schema = 1, data = { name = "x" }, savedAt = 0 }, steps, 3)
 			assert(readOnly == false)
-			assert(data.gold == 0, "gold should be 0")
-			assert(data.coins == nil, "coins should be renamed away")
+			assert(type(data.layout) == "table", "layout should be there")
+			assert(data.pieces == nil, "pieces should be renamed away")
 			assert(data.name == "x")
 		end,
 	},
 	{
 		name = "a record already at current is unchanged",
 		run = function()
-			local data, readOnly = Migrations.run({ schema = 3, data = { gold = 5 }, savedAt = 0 }, steps, 3)
+			local data, readOnly = Migrations.run({ schema = 3, data = { coins = 5 }, savedAt = 0 }, steps, 3)
 			assert(readOnly == false)
-			assert(Deep.equal(data, { gold = 5 }), "data should be untouched")
+			assert(Deep.equal(data, { coins = 5 }), "data should be untouched")
 		end,
 	},
 	{
@@ -49,7 +49,7 @@ return {
 			local record = { schema = 1, data = { name = "x" }, savedAt = 0 }
 			local snapshot = Deep.copy(record)
 			local data = Migrations.run(record, steps, 3)
-			assert(data.gold == 0, "the migration did run")
+			assert(type(data.layout) == "table", "the migration did run")
 			assert(Deep.equal(record, snapshot), "input record changed")
 		end,
 	},

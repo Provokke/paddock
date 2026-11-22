@@ -10,7 +10,7 @@ local Store = require("../../src/server/Data/Store")
 local StoreServer = {}
 
 function StoreServer.defaultData(): { [string]: any }
-	return { gold = 0, wallet = { balances = {}, log = {} }, bought = {}, receipts = {} }
+	return { coins = 0, layout = {} }
 end
 
 -- Resumes a thread that was queued behind another session call, and lets its errors through.

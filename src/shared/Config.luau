@@ -10,8 +10,8 @@ return table.freeze({
 	CellSize = 4, -- studs per grid cell
 	StartingCoins = 500, -- what a new player's profile starts with
 	SellRefund = 0.5, -- share of the cost handed back when a piece is sold
-	UndoDepth = 10, -- how many placements a player can step back through
-	UndoSeconds = 30, -- how long a placement stays undoable
+	UndoDepth = 10, -- how many actions (places, moves, sells) a player can step back through
+	UndoSeconds = 30, -- how long an action stays undoable
 	-- id -> piece. w and d are the footprint in cells, cost is in Coins, maxCount caps how many
 	-- of that piece one paddock can hold, and colour is {r, g, b} for the placeholder part.
 	Placeables = table.freeze({

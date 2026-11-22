@@ -47,7 +47,7 @@ return {
 				session:save()
 			end)
 			-- A trade commits while the autosave is in flight, and its save is asked for.
-			session.data.gold = 1
+			session.data.coins = 1
 			local tradeSaved: boolean? = nil
 			start(function()
 				tradeSaved = session:save()
@@ -56,7 +56,7 @@ return {
 			StoreServer.resume(autosave)
 			assert(tradeSaved == true, "the queued save ran once the autosave finished")
 			assert(ds.calls == 3)
-			assert(records.p1.data.gold == 1, `stored gold should be 1, got {records.p1.data.gold}`)
+			assert(records.p1.data.coins == 1, `stored coins should be 1, got {records.p1.data.coins}`)
 		end,
 	},
 	{
@@ -79,14 +79,14 @@ return {
 			local autosave = start(function()
 				session:save()
 			end)
-			session.data.gold = 1
+			session.data.coins = 1
 			start(function()
 				session:save()
 			end)
 			StoreServer.resume(autosave)
-			assert(records.p1.data.gold == 1, `stored gold should be 1, got {records.p1.data.gold}`)
+			assert(records.p1.data.coins == 1, `stored coins should be 1, got {records.p1.data.coins}`)
 			-- control: the session itself still says 1, so the store matches memory
-			assert(session.data.gold == 1)
+			assert(session.data.coins == 1)
 		end,
 	},
 	{
@@ -98,11 +98,11 @@ return {
 			assert(session ~= nil)
 			ds:rerunNext(1)
 			ds:hookNext(function()
-				session.data.gold = 2 -- changed while the first run's write was in flight
+				session.data.coins = 2 -- changed while the first run's write was in flight
 			end)
 			assert(session:save() == true)
 			assert(ds.runs == 3, "load once, save twice")
-			assert(records.p1.data.gold == 2, `stored gold should be 2, got {records.p1.data.gold}`)
+			assert(records.p1.data.coins == 2, `stored coins should be 2, got {records.p1.data.coins}`)
 		end,
 	},
 	{
@@ -116,7 +116,7 @@ return {
 			local autosave = start(function()
 				session:save()
 			end)
-			session.data.gold = 3
+			session.data.coins = 3
 			local released: boolean? = nil
 			start(function()
 				released = session:release()
@@ -130,7 +130,7 @@ return {
 			assert(lateSave == false, "nothing is saved after the release")
 			assert(session.lost == false, "a save after the release is not a lost lease")
 			assert(ds.calls == 3, `load, save, release only, calls={ds.calls}`)
-			assert(records.p1.lease == nil and records.p1.data.gold == 3)
+			assert(records.p1.lease == nil and records.p1.data.coins == 3)
 		end,
 	},
 	{
@@ -144,9 +144,9 @@ return {
 				end
 				local session = store:load("p1")
 				assert(session ~= nil)
-				session.data.gold = 4
+				session.data.coins = 4
 				assert(session:save() == true)
-				session.data.gold = 5
+				session.data.coins = 5
 				assert(session:release() == true)
 				local again = store:load("p1")
 				assert(again ~= nil)
@@ -154,7 +154,7 @@ return {
 			end
 			local once, twice = play(false), play(true)
 			assert(Deep.equal(once, twice), "a re-run must not change what is stored")
-			assert(twice.p1.data.gold == 5)
+			assert(twice.p1.data.coins == 5)
 		end,
 	},
 }

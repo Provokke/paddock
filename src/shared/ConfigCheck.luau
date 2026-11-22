@@ -11,6 +11,22 @@ local function isWhole(v: any, min: number): boolean
 	return isNumber(v) and v >= min and v % 1 == 0
 end
 
+-- The longest piece id a client can send. Handlers drops a longer one, so it could never be placed.
+local MAX_ID = 32
+
+-- An { r, g, b } colour, each a whole number from 0 to 255.
+local function isColour(v: any): boolean
+	if type(v) ~= "table" or #v ~= 3 then
+		return false
+	end
+	for i = 1, 3 do
+		if not isWhole(v[i], 0) or v[i] > 255 then
+			return false
+		end
+	end
+	return true
+end
+
 local TOP_NUMBERS = {
 	"SchemaVersion",
 	"AutosaveSeconds",
@@ -78,6 +94,9 @@ function ConfigCheck.check(config: any): (boolean, string?)
 		return false, "Placeables must be a table"
 	end
 	for id, piece in placeables do
+		if type(id) ~= "string" or #id < 1 or #id > MAX_ID then
+			return false, `Placeables.{tostring(id)} needs an id of 1 to {MAX_ID} characters`
+		end
 		if type(piece) ~= "table" then
 			return false, `Placeables.{id} must be a table`
 		end
@@ -91,6 +110,9 @@ function ConfigCheck.check(config: any): (boolean, string?)
 		end
 		if not isWhole(piece.cost, 0) then
 			return false, `Placeables.{id}.cost must be a whole number of 0 or more`
+		end
+		if not isColour(piece.colour) then
+			return false, `Placeables.{id}.colour must be three whole numbers from 0 to 255`
 		end
 	end
 

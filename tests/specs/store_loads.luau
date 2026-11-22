@@ -9,7 +9,7 @@ return {
 	{
 		name = "a record that can't be migrated fails the load and hands the lease back",
 		run = function()
-			local records: any = { p1 = { schema = 1, data = { gold = 1 }, savedAt = 0 } }
+			local records: any = { p1 = { schema = 1, data = { coins = 1 }, savedAt = 0 } }
 			local store = server(records, FakeClock.new(0), "JOB", { schema = 2, steps = {} })
 			local ok, session, outcome = pcall(function()
 				return store:load("p1")
@@ -17,19 +17,19 @@ return {
 			assert(ok, `load must not throw: {tostring(session)}`)
 			assert(session == nil and outcome == "error", outcome)
 			assert(records.p1.lease == nil, "the lease was handed back")
-			assert(records.p1.data.gold == 1 and records.p1.schema == 1, "the stored data is untouched")
+			assert(records.p1.data.coins == 1 and records.p1.schema == 1, "the stored data is untouched")
 			-- control: with the step in place the same record loads and upgrades
 			local fixed = server(records, FakeClock.new(0), "JOB", {
 				schema = 2,
 				steps = {
 					function(data: any)
-						data.gold += 1
+						data.coins += 1
 						return data
 					end,
 				},
 			})
 			local again = fixed:load("p1")
-			assert(again ~= nil and again.data.gold == 2)
+			assert(again ~= nil and again.data.coins == 2)
 		end,
 	},
 	{
@@ -41,18 +41,18 @@ return {
 			assert(session == nil and outcome == "error", outcome)
 			assert(records.p1.lease == nil and records.p1.data == nil)
 			-- control
-			records.p2 = { schema = 1, data = { gold = 3 }, savedAt = 0 }
+			records.p2 = { schema = 1, data = { coins = 3 }, savedAt = 0 }
 			local good = store:load("p2")
-			assert(good ~= nil and good.data.gold == 3)
+			assert(good ~= nil and good.data.coins == 3)
 		end,
 	},
 	{
 		name = "a failing decode fails the load and hands the lease back",
 		run = function()
-			local records: any = { p1 = { schema = 1, data = { gold = 1 }, savedAt = 0 } }
+			local records: any = { p1 = { schema = 1, data = { coins = 1 }, savedAt = 0 } }
 			local store = server(records, FakeClock.new(0), "JOB", {
 				decode = function(saved: any)
-					assert(saved.wallet ~= nil, "no wallet")
+					assert(saved.layout ~= nil, "no layout")
 					return saved
 				end,
 			})
@@ -60,7 +60,7 @@ return {
 			assert(session == nil and outcome == "error", outcome)
 			assert(records.p1.lease == nil)
 			-- control
-			records.p1.data.wallet = {}
+			records.p1.data.layout = {}
 			local good = store:load("p1")
 			assert(good ~= nil)
 		end,
@@ -113,7 +113,7 @@ return {
 			broken = false
 			local live = store:load("p2")
 			assert(live ~= nil)
-			live.data.gold = 4
+			live.data.coins = 4
 			broken = true
 			local saveOk, saved = pcall(function()
 				return live:save()
@@ -121,7 +121,7 @@ return {
 			assert(saveOk and saved == false and live.lost == false, "a failed save, not a lost lease")
 			-- control
 			broken = false
-			assert(live:save() == true and records.p2.data.gold == 4)
+			assert(live:save() == true and records.p2.data.coins == 4)
 		end,
 	},
 	{

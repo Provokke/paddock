@@ -16,9 +16,9 @@ return {
 			assert(outcome == "new", outcome)
 			assert(session ~= nil)
 			assert(Deep.equal(session.data, defaultData()))
-			session.data.gold = 12
+			session.data.coins = 12
 			assert(session:save() == true)
-			assert(records.p1.data.gold == 12, "backing data should hold the save")
+			assert(records.p1.data.coins == 12, "backing data should hold the save")
 			assert(records.p1.lease.owner == session.owner, "backing lease should be this session's")
 			assert(session.owner == "A:1", session.owner)
 			assert(records.p1.schema == 1, "schema stamped on the record")
@@ -53,12 +53,12 @@ return {
 			clock:advance(181)
 			local b, outcome = storeB:load("p1")
 			assert(b ~= nil and outcome == "stolen", outcome)
-			b.data.gold = 50
+			b.data.coins = 50
 			assert(b:save() == true)
-			a.data.gold = 999
+			a.data.coins = 999
 			assert(a:save() == false, "the old owner's save should fail")
 			assert(a.lost == true, "the old owner should know it lost the lease")
-			assert(records.p1.data.gold == 50, "the new owner's data must not be overwritten")
+			assert(records.p1.data.coins == 50, "the new owner's data must not be overwritten")
 			assert(records.p1.lease.owner == b.owner)
 		end,
 	},
@@ -115,7 +115,7 @@ return {
 		name = "a record from a newer schema loads read-only and only the lease is extended",
 		run = function()
 			local clock = FakeClock.new(0)
-			local records = { p1 = { schema = 9, data = { gold = 5 }, savedAt = 0 } }
+			local records = { p1 = { schema = 9, data = { coins = 5 }, savedAt = 0 } }
 			local store = server(records, clock, "A")
 			local session = store:load("p1")
 			assert(session ~= nil and session.readOnly == true)
@@ -123,7 +123,7 @@ return {
 			clock:advance(60)
 			assert(session:save() == true)
 			assert(records.p1.data.x == nil, "read-only data must not be written")
-			assert(records.p1.data.gold == 5)
+			assert(records.p1.data.coins == 5)
 			assert(records.p1.schema == 9)
 			assert(records.p1.lease.expiresAt == 240, "lease extended from the save time")
 		end,
@@ -149,13 +149,13 @@ return {
 			local first = server(records, clock, "A")
 			local session = first:load("p1")
 			assert(session ~= nil)
-			session.data.bought.sword_skin = { window = 4, count = 1 }
+			session.data.layout = { { id = "shed", x = 2, z = 3, r = 1 } }
 			assert(session:save() == true)
 			assert(session:release() == true)
 			local second = server(records, clock, "B")
 			local again, outcome = second:load("p1")
 			assert(again ~= nil and outcome == "taken", outcome)
-			assert(again.data.bought.sword_skin.window == 4 and again.data.bought.sword_skin.count == 1)
+			assert(again.data.layout[1].id == "shed" and again.data.layout[1].r == 1)
 		end,
 	},
 	{
@@ -164,42 +164,42 @@ return {
 			local records = {}
 			local store = server(records, FakeClock.new(0), "A", {
 				encode = function(data: any)
-					return { packed = data.gold }
+					return { packed = data.coins }
 				end,
 				decode = function(saved: any)
-					return { gold = saved.packed or 0 }
+					return { coins = saved.packed or 0 }
 				end,
 			})
 			local session = store:load("p1")
 			assert(session ~= nil)
-			session.data.gold = 7
+			session.data.coins = 7
 			assert(session:save() == true)
 			assert(
-				records.p1.data.packed == 7 and records.p1.data.gold == nil,
+				records.p1.data.packed == 7 and records.p1.data.coins == nil,
 				"stored form is the encoded one"
 			)
 			assert(session:release() == true)
 			local again = store:load("p1")
-			assert(again ~= nil and again.data.gold == 7, "session data is the decoded form")
+			assert(again ~= nil and again.data.coins == 7, "session data is the decoded form")
 		end,
 	},
 	{
 		name = "a read-only release hands the lease back and keeps the stored data",
 		run = function()
-			local records: any = { p1 = { schema = 9, data = { gold = 5 }, savedAt = 0 } }
+			local records: any = { p1 = { schema = 9, data = { coins = 5 }, savedAt = 0 } }
 			local store = server(records, FakeClock.new(0), "A")
 			local session = store:load("p1")
 			assert(session ~= nil and session.readOnly)
-			session.data.gold = 99
+			session.data.coins = 99
 			assert(session:release() == true)
 			assert(records.p1.lease == nil, "the lease is handed back")
-			assert(records.p1.data.gold == 5 and records.p1.schema == 9, "the newer data is kept")
+			assert(records.p1.data.coins == 5 and records.p1.schema == 9, "the newer data is kept")
 			-- control: a current-schema release writes its data
-			records.p2 = { schema = 1, data = { gold = 5 }, savedAt = 0 }
+			records.p2 = { schema = 1, data = { coins = 5 }, savedAt = 0 }
 			local current = store:load("p2")
 			assert(current ~= nil and not current.readOnly)
-			current.data.gold = 99
-			assert(current:release() == true and records.p2.data.gold == 99)
+			current.data.coins = 99
+			assert(current:release() == true and records.p2.data.coins == 99)
 		end,
 	},
 }

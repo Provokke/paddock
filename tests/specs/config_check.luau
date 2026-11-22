@@ -136,6 +136,45 @@ return {
 		end,
 	},
 	{
+		name = "a placeable with no colour, or a bad one, is flagged",
+		run = function()
+			flagged(function(c)
+				c.Placeables.fence.colour = nil
+			end, "Placeables.fence.colour")
+			flagged(function(c)
+				c.Placeables.fence.colour = { 150, 105 }
+			end, "Placeables.fence.colour")
+			flagged(function(c)
+				c.Placeables.fence.colour = { 150, 256, 60 }
+			end, "Placeables.fence.colour")
+			flagged(function(c)
+				c.Placeables.fence.colour = { 150, 10.5, 60 }
+			end, "Placeables.fence.colour")
+			flagged(function(c)
+				c.Placeables.fence.colour = "brown"
+			end, "Placeables.fence.colour")
+			-- passes: the edges of the range
+			local config = Deep.copy(Config)
+			config.Placeables.fence.colour = { 0, 255, 0 }
+			assert(ConfigCheck.check(config), "0 and 255 are allowed")
+		end,
+	},
+	{
+		name = "a placeable id longer than a client may send is flagged",
+		run = function()
+			flagged(function(c)
+				c.Placeables[string.rep("a", 33)] = Deep.copy(c.Placeables.fence)
+			end, "1 to 32 characters")
+			flagged(function(c)
+				c.Placeables[""] = Deep.copy(c.Placeables.fence)
+			end, "1 to 32 characters")
+			-- passes: an id of exactly 32 characters
+			local config = Deep.copy(Config)
+			config.Placeables[string.rep("a", 32)] = Deep.copy(config.Placeables.fence)
+			assert(ConfigCheck.check(config), "32 characters is the longest allowed")
+		end,
+	},
+	{
 		name = "limits of 0 or less are flagged",
 		run = function()
 			flagged(function(c)
