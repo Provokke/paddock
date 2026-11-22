@@ -17,6 +17,26 @@ function Grid.centre(x: number, z: number, fw: number, fd: number, cellSize: num
 	return (x + fw / 2) * cellSize, (z + fd / 2) * cellSize
 end
 
+-- Where a piece's pivot sits relative to the plot part's centre, and how far it is turned. The
+-- caller applies it as plotCFrame * CFrame.new(ox, oy, oz) * CFrame.Angles(0, yaw, 0). The server
+-- places the models with it and the client places the ghost with it, so they cannot drift apart.
+-- w and d are the unrotated footprint in cells, sx, sy and sz are the plot part's size in studs.
+function Grid.pivot(
+	x: number,
+	z: number,
+	w: number,
+	d: number,
+	r: number,
+	cellSize: number,
+	sx: number,
+	sy: number,
+	sz: number
+): (number, number, number, number)
+	local fw, fd = Grid.footprint(w, d, r)
+	local cx, cz = Grid.centre(x, z, fw, fd, cellSize)
+	return -sx / 2 + cx, sy / 2, -sz / 2 + cz, r * math.pi / 2
+end
+
 -- Floors, so a point just left of or above the plot gives a negative cell rather than 0.
 function Grid.cellAt(lx: number, lz: number, cellSize: number): (number, number)
 	return math.floor(lx / cellSize), math.floor(lz / cellSize)

@@ -177,11 +177,8 @@ local function makeModel(state: State, uid: number, piece: any)
 	local def = Config.Placeables[piece.id]
 	local cell = Config.CellSize
 	local size = part.Size
-	local fw, fd = Grid.footprint(def.w, def.d, piece.r)
-	local cx, cz = Grid.centre(piece.x, piece.z, fw, fd, cell)
-	local pivot = part.CFrame
-		* CFrame.new(-size.X / 2 + cx, size.Y / 2, -size.Z / 2 + cz)
-		* CFrame.Angles(0, piece.r * math.pi / 2, 0)
+	local ox, oy, oz, yaw = Grid.pivot(piece.x, piece.z, def.w, def.d, piece.r, cell, size.X, size.Y, size.Z)
+	local pivot = part.CFrame * CFrame.new(ox, oy, oz) * CFrame.Angles(0, yaw, 0)
 
 	local template = nil
 	local pieces = ReplicatedStorage:FindFirstChild("PaddockPieces")

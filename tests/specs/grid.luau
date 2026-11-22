@@ -79,4 +79,27 @@ return {
 			end
 		end,
 	},
+	{
+		name = "pivot puts a piece on the plot's top face at its footprint centre",
+		run = function()
+			-- 2x1 piece at cell (3, 2) on a 40 x 6 x 24 plot, cells of 4 studs
+			local ox, oy, oz, yaw = Grid.pivot(3, 2, 2, 1, 0, 4, 40, 6, 24)
+			near(ox, -20 + 16, "ox")
+			near(oy, 3, "oy")
+			near(oz, -12 + 10, "oz")
+			near(yaw, 0, "yaw")
+		end,
+	},
+	{
+		name = "pivot uses the rotated footprint and turns a quarter per step",
+		run = function()
+			local ox, _, oz, yaw = Grid.pivot(3, 2, 2, 1, 1, 4, 40, 6, 24)
+			-- r = 1 gives a 1 x 2 footprint: centre (3.5, 3) cells
+			near(ox, -20 + 14, "ox")
+			near(oz, -12 + 12, "oz")
+			near(yaw, math.pi / 2, "yaw")
+			local _, _, _, yaw3 = Grid.pivot(0, 0, 1, 1, 3, 4, 8, 2, 8)
+			near(yaw3, 3 * math.pi / 2, "yaw3")
+		end,
+	},
 }
