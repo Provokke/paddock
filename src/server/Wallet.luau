@@ -8,6 +8,7 @@ Wallet.__index = Wallet
 -- Past 2^53 a double can no longer count every whole number, so that is the ceiling.
 local MAX_COINS = 2 ^ 53
 
+-- The adapter Build takes. Keep in step with WalletLike in Build.luau.
 export type WalletLike = {
 	balance: (WalletLike) -> number,
 	charge: (WalletLike, number, string) -> boolean,
