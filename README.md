@@ -206,6 +206,7 @@ The client script and the UI can't run under Lune. They build with Rojo and are 
 
 ## ⚠️ Honest limits
 
+- Saving has only been tested against a fake data store in Lune. None of it has run against a real Roblox DataStore yet, so throttling, outages and real request budgets are unproven.
 - One flat layer per plot: no stacking, no walls on walls and no terrain editing.
 - No plot sharing or build permissions for friends.
 - One saved layout per player.
