@@ -1,0 +1,17 @@
+{
+	"name": "paddock",
+	"tree": {
+		"$className": "DataModel",
+		"ReplicatedStorage": {
+			"Paddock": { "$path": "src/shared" }
+		},
+		"ServerScriptService": {
+			"Paddock": { "$path": "src/server" }
+		},
+		"StarterPlayer": {
+			"StarterPlayerScripts": {
+				"Paddock": { "$path": "src/client" }
+			}
+		}
+	}
+}
