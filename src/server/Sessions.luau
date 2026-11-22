@@ -6,6 +6,10 @@
 -- At most one load or release runs for a player at a time. A player who leaves and rejoins
 -- quickly waits for the old release to land before the new load starts, so the new load reads
 -- what the old session wrote instead of being locked out by it (or, worse, racing it).
+--
+-- A release on leave or shutdown first waits, for up to closeSeconds, until `inUse` says no build
+-- call for that player is still running (one can be waiting on a wallet that yields). The save
+-- then holds the finished call, not half of it.
 local Sessions = {}
 Sessions.__index = Sessions
 
@@ -21,6 +25,7 @@ export type Deps = {
 	clock: () -> number,
 	closeSeconds: number, -- how long close() waits, and how long a release may retry under it
 	log: (message: string) -> (),
+	inUse: ((userId: number) -> boolean)?, -- a build call for this player is still running
 }
 
 export type Sessions = typeof(setmetatable(
@@ -57,12 +62,32 @@ local function finish(self: Sessions, userId: number)
 	self.inFlight -= 1
 end
 
--- Releases in the background. The player counts as busy until it is done.
+-- Waits, for up to `limit` seconds, for a build call still running for this player to finish.
+-- Returns how long it waited.
+local function settle(self: Sessions, userId: number, limit: number): number
+	local deps = self.deps
+	local inUse = deps.inUse
+	if inUse == nil or not inUse(userId) then
+		return 0
+	end
+	local start = deps.clock()
+	while inUse(userId) and deps.clock() < start + limit do
+		deps.wait(0.1)
+	end
+	if inUse(userId) then
+		deps.log(`a build call for {userId} was still running after {limit} s, so it was released anyway`)
+	end
+	return deps.clock() - start
+end
+
+-- Releases in the background, once any build call still running for the player has finished. The
+-- player counts as busy until it is done.
 local function releaseLater(self: Sessions, userId: number, session: any, waitLimit: number?)
 	begin(self, userId)
 	self.deps.spawn(function()
 		local ok, err = pcall(function()
-			session:release(waitLimit)
+			local waited = settle(self, userId, waitLimit or self.deps.closeSeconds)
+			session:release(if waitLimit ~= nil then math.max(0, waitLimit - waited) else nil)
 		end)
 		if not ok then
 			self.deps.log(`release failed for {userId}: {tostring(err)}`)
@@ -114,7 +139,7 @@ function Sessions.join(self: Sessions, userId: number, player: any)
 	end
 end
 
--- PlayerRemoving. The release carries on in the background.
+-- PlayerRemoving. The release carries on in the background, after any build call still running.
 function Sessions.leave(self: Sessions, userId: number)
 	local session = self.live[userId]
 	if session == nil then
@@ -185,9 +210,10 @@ function Sessions.saveAll(self: Sessions)
 	end
 end
 
--- BindToClose. Releases every live session in parallel, then waits until every load and release
--- still running (including loads for players who joined just before) has finished, or until
--- closeSeconds have passed. Loads still retrying stop at their next attempt.
+-- BindToClose. Releases every live session in parallel (each after any build call still running),
+-- then waits until every load and release still running (including loads for players who joined
+-- just before) has finished, or until closeSeconds have passed. Loads still retrying stop at their
+-- next attempt.
 function Sessions.close(self: Sessions)
 	local deps = self.deps
 	self.closing = true

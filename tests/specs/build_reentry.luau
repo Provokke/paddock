@@ -1,6 +1,7 @@
 --!strict
 -- Build against wallets and layouts that misbehave: a wallet that yields mid-call (so a second
--- call can run in the gap), a wallet that refuses, and a layout whose place fails late.
+-- call can run in the gap), a wallet that refuses, and a layout whose place fails late. Also the
+-- commit hook, which must run before every wallet call.
 local Config = require("../../src/shared/Config")
 local Deep = require("../fakes/Deep")
 local Layout = require("../../src/shared/Layout")
@@ -74,12 +75,14 @@ local function fakeWallet(coins: number, where: string): Fake
 	return w
 end
 
-type Rig = { build: any, layout: any, wallet: Fake, defs: any }
+type Rig = { build: any, layout: any, wallet: Fake, defs: any, commits: { number } }
 
+-- `commits` records how many pieces the layout held each time Build called commit.
 local function rig(coins: number, where: string): Rig
 	local defs = Deep.copy(Config.Placeables)
 	local layout = Layout.new(10, 8, defs)
 	local wallet = fakeWallet(coins, where)
+	local commits: { number } = {}
 	local build = Build.new({
 		layout = layout,
 		wallet = wallet :: any,
@@ -90,8 +93,11 @@ local function rig(coins: number, where: string): Rig
 		now = function()
 			return 0
 		end,
+		commit = function()
+			table.insert(commits, #layout:pieces())
+		end,
 	})
-	return { build = build, layout = layout, wallet = wallet, defs = defs }
+	return { build = build, layout = layout, wallet = wallet, defs = defs, commits = commits }
 end
 
 local function state(r: Rig): any
@@ -410,7 +416,7 @@ return {
 		end,
 	},
 	{
-		name = "place credits back when the layout place fails after canPlace passed",
+		name = "a layout place that fails after canPlace passed charges nothing",
 		run = function()
 			local r = rig(500, "after")
 			r.layout.place = function()
@@ -420,47 +426,35 @@ return {
 			local piece, why = r.build:place("shed", 0, 0, 0)
 			assert(piece == nil and why == "overlap")
 			assert(Deep.equal(before, state(r)))
-			assert(r.wallet.log[1] == "charge 120 place shed")
-			assert(r.wallet.log[2] == "credit 120 place failed shed")
+			assert(#r.wallet.log == 0, "the piece comes before the charge, so the wallet is never called")
 			local kind, nothing = r.build:undo()
 			assert(kind == nil and nothing == "nothing", "a failed place leaves no history")
 		end,
 	},
 	{
-		name = "a refused credit-back raises an error naming the amount",
-		run = function()
-			local r = rig(500, "after")
-			r.layout.place = function()
-				return nil, "overlap"
-			end
-			r.wallet.refuseCredit = true
-			local ok, err = pcall(function()
-				r.build:place("shed", 0, 0, 0)
-			end)
-			assert(not ok, "a refused credit-back must not be silent")
-			assert(string.find(tostring(err), "120", 1, true), tostring(err))
-			assert(string.find(tostring(err), "place failed shed", 1, true), tostring(err))
-		end,
-	},
-	{
-		name = "undo sell raises when the credit-back after a late place failure is refused",
+		name = "a refused credit on sell whose piece can't go back raises an error naming the uid",
 		run = function()
 			local r = rig(500, "after")
 			local shed = placed(r, "shed", 0, 0)
-			r.build:sell(shed.uid)
 			r.layout.placeWithUid = function()
 				return nil, "overlap"
 			end
 			r.wallet.refuseCredit = true
 			local ok, err = pcall(function()
-				r.build:undo()
+				r.build:sell(shed.uid)
 			end)
-			assert(not ok)
-			assert(string.find(tostring(err), "60", 1, true), tostring(err))
+			assert(not ok, "a sold piece that can't be put back must not be silent")
+			assert(string.find(tostring(err), `sold piece {shed.uid}`, 1, true), tostring(err))
+			-- control: when the piece can go back, the same refusal is an ordinary answer
+			local c = rig(500, "after")
+			local s = placed(c, "shed", 0, 0)
+			c.wallet.refuseCredit = true
+			local refund, why = c.build:sell(s.uid)
+			assert(refund == nil and why == "wallet_refused")
 		end,
 	},
 	{
-		name = "undo sell credits back and keeps the entry when the layout place fails late",
+		name = "undo sell keeps the entry and charges nothing when the layout place fails late",
 		run = function()
 			local r = rig(500, "after")
 			local shed = placed(r, "shed", 0, 0)
@@ -470,11 +464,141 @@ return {
 				return nil, "overlap"
 			end
 			local before = state(r)
+			local calls = #r.wallet.log
 			local kind, why = r.build:undo()
 			assert(kind == nil and why == "overlap")
 			assert(Deep.equal(before, state(r)))
+			assert(#r.wallet.log == calls, "the piece comes before the charge, so the wallet is never called")
 			r.layout.placeWithUid = real
 			assert(r.build:undo() == "sell")
+		end,
+	},
+	{
+		name = "undo sell with a refused charge takes the piece off again and keeps the entry",
+		run = function()
+			local r = rig(500, "after")
+			local shed = placed(r, "shed", 0, 0)
+			r.build:sell(shed.uid)
+			r.wallet.refuseCharge = true
+			local before = state(r)
+			local kind, why = r.build:undo()
+			assert(kind == nil and why == "cant_afford")
+			assert(Deep.equal(before, state(r)))
+			assert(r.commits[#r.commits] == 0, "the rollback was committed too")
+			r.wallet.refuseCharge = false
+			assert(r.build:undo() == "sell", "the entry stays undoable")
+		end,
+	},
+	{
+		name = "yield: a piece waiting on its charge can't be sold, moved or undone",
+		run = function()
+			for _, where in wheres do
+				local r = rig(500, where)
+				local res = interleave(r, {
+					function()
+						return r.build:place("shed", 0, 0, 0)
+					end,
+					function()
+						-- runs while the place is parked inside its charge
+						local uid = r.layout:pieces()[1].uid
+						local refund, sellWhy = r.build:sell(uid)
+						local moved, moveWhy = r.build:move(uid, 4, 4, 0)
+						assert(refund == nil and sellWhy == "busy", `{where}: sell {tostring(sellWhy)}`)
+						assert(moved == false and moveWhy == "busy", `{where}: move {tostring(moveWhy)}`)
+						return refund, sellWhy
+					end,
+				}, { 1, 2 })
+				assert(res[1][1] ~= nil, `{where}: the place still lands`)
+				assert(r.wallet.coins == 380 and #r.layout:pieces() == 1, `{where}: coins {r.wallet.coins}`)
+				-- control: once the charge has landed the piece can be sold
+				assert(r.build:sell(res[1][1].uid) == 60)
+			end
+		end,
+	},
+	{
+		name = "yield: an undo that reaches a piece waiting on its charge is refused as busy and kept",
+		run = function()
+			for _, where in wheres do
+				local r = rig(500, where)
+				local shed = placed(r, "shed", 0, 0)
+				r.build:sell(shed.uid)
+				local res = interleave(r, {
+					function()
+						return r.build:undo() -- the sell: the shed goes back, pending its charge
+					end,
+					function()
+						return r.build:undo() -- the place: its piece is the pending shed
+					end,
+				}, { 1, 2 })
+				assert(res[1][1] == "sell", `{where}: {tostring(res[1][2])}`)
+				assert(res[2][1] == nil and res[2][2] == "busy", `{where}: {tostring(res[2][2])}`)
+				assert(r.wallet.coins == 380 and #r.layout:pieces() == 1)
+				assert(r.build:undo() == "place", `{where}: the place entry was kept`)
+				assert(r.wallet.coins == 500 and #r.layout:pieces() == 0)
+			end
+		end,
+	},
+	{
+		name = "commit runs before every wallet call, holding the layout as it will be",
+		run = function()
+			local r = rig(500, "after")
+			local seen: { string } = {}
+			local charge, credit = r.wallet.charge, r.wallet.credit
+			r.wallet.charge = function(self, amount, reason)
+				table.insert(seen, `charge {r.commits[#r.commits]}`)
+				return charge(self, amount, reason)
+			end
+			r.wallet.credit = function(self, amount, reason)
+				table.insert(seen, `credit {r.commits[#r.commits]}`)
+				return credit(self, amount, reason)
+			end
+			local shed = placed(r, "shed", 0, 0) -- charged with 1 piece committed
+			r.build:sell(shed.uid) -- credited with 0 committed
+			r.build:undo() -- undo sell: charged with 1 committed
+			r.build:undo() -- undo place: credited with 0 committed
+			local want = { "charge 1", "credit 0", "charge 1", "credit 0" }
+			assert(Deep.equal(seen, want), table.concat(seen, ", "))
+			-- a refused charge commits the rollback as well
+			r.wallet.coins = 0
+			local piece, why = r.build:place("shed", 0, 0, 0)
+			assert(piece == nil and why == "cant_afford")
+			assert(r.commits[#r.commits] == 0 and r.commits[#r.commits - 1] == 1)
+			-- control: a refusal before any change commits nothing
+			local count = #r.commits
+			r.build:place("unicorn", 0, 0, 0)
+			r.build:sell(999)
+			assert(#r.commits == count)
+		end,
+	},
+	{
+		name = "a charge that throws takes the unpaid piece off again and raises",
+		run = function()
+			local r = rig(500, "after")
+			local real = r.wallet.charge
+			r.wallet.charge = function()
+				error("ledger offline")
+			end
+			local ok, err = pcall(function()
+				r.build:place("shed", 0, 0, 0)
+			end)
+			assert(not ok and string.find(tostring(err), "ledger offline", 1, true), tostring(err))
+			assert(#r.layout:pieces() == 0 and r.commits[#r.commits] == 0, "no unpaid piece is left")
+			assert(r.wallet.coins == 500 and #r.build.history == 0)
+			-- undo sell: the piece comes off again and the entry is kept for another try
+			r.wallet.charge = real
+			local shed = placed(r, "shed", 0, 0)
+			r.build:sell(shed.uid)
+			r.wallet.charge = function()
+				error("ledger offline")
+			end
+			assert(not pcall(function()
+				r.build:undo()
+			end))
+			assert(#r.layout:pieces() == 0 and r.wallet.coins == 440)
+			assert(r.build.pending[shed.uid] == nil, "nothing is left pending")
+			-- control: with the wallet back, the kept entry undoes the sale
+			r.wallet.charge = real
+			assert(r.build:undo() == "sell" and r.wallet.coins == 380 and #r.layout:pieces() == 1)
 		end,
 	},
 	{

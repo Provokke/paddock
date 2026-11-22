@@ -10,7 +10,7 @@ local RateLimiter = require("../../src/shared/RateLimiter")
 local Validate = require("../../src/shared/Validate")
 local Wallet = require("../../src/server/Wallet")
 
-type Rig = { handlers: any, calls: { string }, syncs: { number }, clock: any }
+type Rig = { handlers: any, calls: { string }, syncs: { number }, logs: { string }, clock: any }
 
 -- A build that records what it was asked and can be told to throw.
 local function fakeBuild(calls: { string }, throws: boolean?): any
@@ -32,7 +32,7 @@ end
 -- User 99 has no build.
 local function rig(build: any?, burst: number?): Rig
 	local clock = FakeClock.new(0)
-	local r: Rig = { calls = {}, syncs = {}, clock = clock, handlers = nil }
+	local r: Rig = { calls = {}, syncs = {}, logs = {}, clock = clock, handlers = nil }
 	local b = build
 	if b == nil then
 		b = fakeBuild(r.calls)
@@ -51,8 +51,45 @@ local function rig(build: any?, burst: number?): Rig
 		sync = function(userId: number)
 			table.insert(r.syncs, userId)
 		end,
+		log = function(message: string)
+			table.insert(r.logs, message)
+		end,
 	})
 	return r
+end
+
+-- A real Build over a Wallet whose onChange yields while `gate.armed` is set, so a call can be
+-- parked inside the wallet and another call made in the gap.
+local function yieldingBuild(coins: number, gate: { armed: boolean }): (any, any, { coins: number })
+	local defs = Deep.copy(Config.Placeables)
+	local layout = Layout.new(10, 8, defs)
+	local data = { coins = coins }
+	local wallet = Wallet.new(data, function()
+		if gate.armed and coroutine.isyieldable() then
+			coroutine.yield()
+		end
+	end)
+	local build = Build.new({
+		layout = layout,
+		wallet = wallet,
+		defs = defs,
+		sellRefund = Config.SellRefund,
+		undoDepth = Config.UndoDepth,
+		undoSeconds = Config.UndoSeconds,
+		now = function()
+			return 0
+		end,
+	})
+	return build, layout, data
+end
+
+-- The kinds in a build's undo history, oldest first, with the uid each one is for.
+local function historyOf(build: any): string
+	local out = {}
+	for _, entry in build.history do
+		table.insert(out, `{entry.kind} {entry.uid}`)
+	end
+	return table.concat(out, ", ")
 end
 
 local function dropped(r: Rig, ...: any)
@@ -175,6 +212,103 @@ return {
 			end)
 			assert(ok, tostring(err))
 			assert(r.handlers.dropped == 2, "counted")
+		end,
+	},
+	{
+		name = "a build that throws logs one line with the player, the action and the error",
+		run = function()
+			local calls: { string } = {}
+			local r = rig(fakeBuild(calls, true))
+			r.handlers:handle(7, "sell", 3)
+			assert(#r.logs == 1, `{#r.logs} lines`)
+			local line = r.logs[1]
+			for _, part in { "7", "sell", "build broke" } do
+				assert(string.find(line, part, 1, true), `{part} missing from: {line}`)
+			end
+			assert(#r.syncs == 1, "still synced")
+			-- control: a call the rules refuse is an ordinary answer and logs nothing
+			local build = yieldingBuild(0, { armed = false })
+			local quiet = rig(build)
+			quiet.handlers:handle(1, "place", "shed", 0, 0, 0)
+			assert(build.deps.layout:pieces()[1] == nil, "refused as cant_afford")
+			assert(#quiet.logs == 0, quiet.logs[1])
+			assert(quiet.handlers.dropped == 0, "a rule refusal is not counted as dropped")
+		end,
+	},
+	{
+		name = "a call while the same player's last call waits on the wallet is dropped and counted",
+		run = function()
+			local gate = { armed = true }
+			local build, layout, data = yieldingBuild(500, gate)
+			local r = rig(build)
+			local first = coroutine.create(function()
+				r.handlers:handle(1, "place", "shed", 0, 0, 0)
+			end)
+			assert(coroutine.resume(first))
+			assert(coroutine.status(first) == "suspended", "negative control: the wallet must yield")
+			assert(r.handlers:busy(1) and not r.handlers:busy(2))
+			gate.armed = false
+			r.handlers:handle(1, "place", "fence", 5, 5, 0)
+			r.handlers:handle(1, "undo")
+			assert(r.handlers.dropped == 2, `{r.handlers.dropped} dropped`)
+			assert(#r.syncs == 0, "a dropped call is not synced")
+			assert(#layout:pieces() == 1 and data.coins == 380)
+			assert(coroutine.resume(first))
+			assert(coroutine.status(first) == "dead" and not r.handlers:busy(1))
+			assert(#r.syncs == 1)
+			-- control: once it has finished, the next call goes through
+			r.handlers:handle(1, "place", "fence", 5, 5, 0)
+			assert(#layout:pieces() == 2 and data.coins == 370 and r.handlers.dropped == 2)
+		end,
+	},
+	{
+		name = "the busy guard keeps undo history in order when a refused undo waited on the wallet",
+		run = function()
+			-- History is place fence, place shed, sell shed. The undo of the sell waits on the
+			-- wallet and is then refused, so its entry goes back on top. A place sent in the gap
+			-- must not end up below it.
+			local gate = { armed = false }
+			local build, layout, data = yieldingBuild(500, gate)
+			local r = rig(build)
+			r.handlers:handle(1, "place", "fence", 0, 0, 0)
+			r.handlers:handle(1, "place", "shed", 4, 0, 0)
+			local shed = layout:pieces()[2]
+			r.handlers:handle(1, "sell", shed.uid)
+			local before = historyOf(build)
+			data.coins = 400
+			-- The charge back of 60 yields, then finds the balance gone and is refused.
+			local real = build.deps.wallet.charge
+			build.deps.wallet.charge = function(self: any, amount: number, reason: string): boolean
+				if reason == "undo sell" then
+					coroutine.yield()
+					return false
+				end
+				return real(self, amount, reason)
+			end
+			local undo = coroutine.create(function()
+				r.handlers:handle(1, "undo")
+			end)
+			assert(coroutine.resume(undo))
+			assert(coroutine.status(undo) == "suspended", "negative control: the undo must be parked")
+			r.handlers:handle(1, "place", "hay_bale", 9, 7, 0)
+			assert(coroutine.resume(undo))
+			assert(historyOf(build) == before, `{historyOf(build)} vs {before}`)
+			assert(#layout:pieces() == 1 and data.coins == 400, "the refused undo changed nothing")
+			-- control: without the guard the same place lands in the gap, under the re-pushed entry
+			local open = yieldingBuild(500, gate)
+			open:place("fence", 0, 0, 0)
+			local s = open:place("shed", 4, 0, 0)
+			open:sell(s.uid)
+			open.deps.wallet.charge = build.deps.wallet.charge
+			local bare = coroutine.create(function()
+				open:undo()
+			end)
+			assert(coroutine.resume(bare))
+			open:place("hay_bale", 9, 7, 0)
+			assert(coroutine.resume(bare))
+			local entries = open.history
+			assert(entries[#entries].kind == "sell", "the re-pushed sell sits above the newer place")
+			assert(entries[#entries - 1].kind == "place", historyOf(open))
 		end,
 	},
 	{

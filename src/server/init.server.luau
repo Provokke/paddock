@@ -129,6 +129,26 @@ local plotIndices: { number } = {}
 for index in plotParts do
 	table.insert(plotIndices, index)
 end
+-- Every plot builds on the same area, the smallest width and depth of any of them, so a saved
+-- layout fits whichever plot its player is given next. Cells still count from each part's min
+-- corner, so a bigger part has a strip along its far edges that can't be built on.
+local buildW, buildD = math.huge, math.huge
+for _, cells in plotCells do
+	buildW = math.min(buildW, cells.w)
+	buildD = math.min(buildD, cells.d)
+end
+local mixedSizes = false
+for index, cells in plotCells do
+	if cells.w ~= buildW or cells.d ~= buildD then
+		mixedSizes = true
+	end
+	plotCells[index] = { w = buildW, d = buildD }
+end
+if mixedSizes then
+	log(
+		`plots are not all the same size, so every plot builds on {buildW} by {buildD} cells, the smallest. Size them alike to use all of each.`
+	)
+end
 if #plotIndices == 0 then
 	warn(
 		`[Paddock] no part is tagged {PLOT_TAG}, so nobody can build yet. Tag a part and give it a PlotIndex.`
@@ -156,7 +176,8 @@ local sessions: any
 local handlers: any
 
 -- The layout goes back into the session data as { id, x, z, r } entries, so the next save holds
--- it with the coins.
+-- it with the coins. Build calls this through its commit dep each time the layout changes, before
+-- it calls the wallet, so a save made while a wallet call is waiting holds the new layout.
 local function writeLayout(state: State)
 	local layout = state.layout
 	if layout == nil then
@@ -248,12 +269,12 @@ local function syncPlayer(userId: number)
 	if player == nil or session == nil or state == nil then
 		return
 	end
-	if state.build ~= nil and sessions:writableSession(userId) == state.session then
-		writeLayout(state)
-	end
 	refreshModels(state)
+	-- The balance comes from the wallet, so a game that passes its own ledger shows that ledger's
+	-- Coins. A player with no build has no wallet, and sees the profile's.
+	local build = state.build
 	local payload: { [string]: any } = {
-		coins = session.data.coins,
+		coins = if build ~= nil then build.deps.wallet:balance() else session.data.coins,
 		pieces = if state.layout ~= nil then state.layout:pieces() else {},
 		cellSize = Config.CellSize,
 	}
@@ -283,11 +304,13 @@ local function onSessionReady(userId: number, session: any)
 		state.folder = folder
 		-- A view-only session shows what was saved but changes nothing: no refund, no write-back.
 		if sessions:writableSession(userId) == session then
+			-- To charge your own ledger, change this line (README: "Using your own wallet").
 			local wallet = Wallet.new(session.data)
-			if result.refund > 0 then
-				wallet:credit(result.refund, "restore refund")
-			end
-			if #result.dropped > 0 then
+			if result.refund > 0 and not wallet:credit(result.refund, "restore refund") then
+				log(
+					`the wallet refused the restore refund of {result.refund} Coins for {userId}, so the dropped pieces were not refunded`
+				)
+			elseif #result.dropped > 0 then
 				log(
 					`{#result.dropped} saved pieces for {userId} no longer fit and were refunded {result.refund} Coins`
 				)
@@ -301,6 +324,9 @@ local function onSessionReady(userId: number, session: any)
 				undoDepth = Config.UndoDepth,
 				undoSeconds = Config.UndoSeconds,
 				now = os.clock,
+				commit = function()
+					writeLayout(state)
+				end,
 			})
 		end
 	end
@@ -331,6 +357,10 @@ sessions = Sessions.new({
 	clock = os.clock,
 	closeSeconds = Config.CloseTimeoutSeconds,
 	log = log,
+	-- A release on leave or shutdown waits for a build call that is still running.
+	inUse = function(userId: number): boolean
+		return handlers ~= nil and handlers:busy(userId)
+	end,
 })
 
 handlers = Handlers.new({
@@ -346,6 +376,7 @@ handlers = Handlers.new({
 		return state.build
 	end,
 	sync = syncPlayer,
+	log = log,
 })
 
 request.OnServerEvent:Connect(function(player: Player, action: any, a: any, b: any, c: any, d: any)

@@ -13,7 +13,8 @@ local LOCKED = "Your data is still open on another server. Rejoin in a minute."
 local LOST = "Your data was opened on another server."
 
 local function world(records: any?): any
-	local w: any = { records = records or {}, kicks = {}, players = {} }
+	-- inUse[userId] = true stands in for a build call that is still running for that player.
+	local w: any = { records = records or {}, kicks = {}, players = {}, logs = {}, inUse = {} }
 	w.clock = FakeClock.new(0)
 	w.sched = FakeScheduler.new(w.clock)
 	local profile = Profile.new({ startingCoins = Config.StartingCoins })
@@ -53,7 +54,12 @@ local function world(records: any?): any
 			return w.clock:now()
 		end,
 		closeSeconds = 25,
-		log = function() end,
+		log = function(message: string)
+			table.insert(w.logs, message)
+		end,
+		inUse = function(userId: number): boolean
+			return w.inUse[userId] == true
+		end,
 	})
 	return w
 end
@@ -252,6 +258,55 @@ return {
 			w2.sessions:get(1).data.coins = 55
 			depart(w2, 1)
 			assert(w2.records.Player_1.data.coins == 55)
+		end,
+	},
+	{
+		name = "a leave waits for a build call still running, then saves what it finished with",
+		run = function()
+			local w = world()
+			arrive(w, 1, "a")
+			local session = w.sessions.live[1]
+			w.inUse[1] = true -- a sell is waiting on the wallet
+			depart(w, 1)
+			w.sched:advance(5)
+			assert(w.records.Player_1.lease ~= nil, "not released while the call runs")
+			session.data.coins = 440 -- the call finishes
+			w.inUse[1] = nil
+			w.sched:advance(1)
+			assert(w.records.Player_1.lease == nil, "released once it finished")
+			assert(w.records.Player_1.data.coins == 440, "with what the call wrote")
+			assert(#w.logs == 0, w.logs[1])
+			-- control: a call that never finishes holds the release up for closeSeconds, no longer
+			local w2 = world()
+			arrive(w2, 1, "a")
+			w2.inUse[1] = true
+			depart(w2, 1)
+			w2.sched:advance(24.5)
+			assert(w2.records.Player_1.lease ~= nil)
+			w2.sched:advance(1)
+			assert(w2.records.Player_1.lease == nil, "released at the bound anyway")
+			assert(#w2.logs == 1 and string.find(w2.logs[1], "still running", 1, true), w2.logs[1])
+		end,
+	},
+	{
+		name = "close waits for a build call still running before it releases",
+		run = function()
+			local w = world()
+			arrive(w, 1, "a")
+			local session = w.sessions.live[1]
+			w.inUse[1] = true
+			local closedAt: number? = nil
+			w.sched:spawn(function()
+				w.sessions:close()
+				closedAt = w.clock:now()
+			end)
+			w.sched:advance(3)
+			assert(closedAt == nil and w.records.Player_1.lease ~= nil, "close is waiting on the call")
+			session.data.coins = 380
+			w.inUse[1] = nil
+			w.sched:advance(1)
+			assert(closedAt ~= nil and closedAt < 4, tostring(closedAt))
+			assert(w.records.Player_1.lease == nil and w.records.Player_1.data.coins == 380)
 		end,
 	},
 }

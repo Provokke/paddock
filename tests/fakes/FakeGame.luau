@@ -53,6 +53,9 @@ export type Options = {
 	blockShared: boolean?, -- ReplicatedStorage:WaitForChild never returns
 	start: number?, -- the clock's starting time
 	records: any?, -- an existing store to start over, as a restarted server would
+	-- Replaces Wallet.new(data) in the script: gets the world and the session data, returns the
+	-- wallet Build is given. For wallets that yield or keep Coins somewhere else.
+	wallet: ((world: any, data: any) -> any)?,
 }
 
 local function signal(world: any): any
@@ -285,6 +288,14 @@ function FakeGame.new(options: Options?): any
 	local script: any = { Data = folder("Data.", DATA) }
 	for name, value in SERVER do
 		script[name] = moduleRef(name, value)
+	end
+	local makeWallet = opts.wallet
+	if makeWallet ~= nil then
+		script.Wallet = moduleRef("Wallet", {
+			new = function(data: any): any
+				return makeWallet(world, data)
+			end,
+		})
 	end
 
 	local env: any = {
