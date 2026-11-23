@@ -157,4 +157,26 @@ return {
 			assert(twice.p1.data.coins == 5)
 		end,
 	},
+	{
+		name = "failed save never leaves a persisted change",
+		run = function()
+			local records = {}
+			local store, ds = server(records, FakeClock.new(0), "JOB")
+			local session = store:load("p1")
+			assert(session ~= nil)
+			session.data.coins = 1
+			assert(session:save() == true)
+			session.data.coins = 2
+			ds:failNext(1, "datastore down")
+			assert(session:save() == false, "a save the store refused reports false")
+			assert(
+				records.p1.data.coins == 1,
+				`the refused change must not be stored, got {records.p1.data.coins}`
+			)
+			assert(session.lost == false, "a failed write is not a lost lease")
+			assert(session.data.coins == 2, "memory stays the truth and is written by the next save")
+			assert(session:save() == true)
+			assert(records.p1.data.coins == 2)
+		end,
+	},
 }
