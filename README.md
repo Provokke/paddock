@@ -4,7 +4,7 @@
 
 Plot claiming, grid placement and saved layouts for Roblox building games, with every place, move and sell checked on the server. It leaves out item art, plot sharing and anything a player does with what they build. Player data is saved with a session lease, the same store as [satchel](https://github.com/Provokke/satchel).
 
-![Licence](https://img.shields.io/badge/LICENCE-MIT-blue?style=for-the-badge)  ![Language](https://img.shields.io/badge/LUAU-00A2FF?style=for-the-badge&logo=roblox&logoColor=white)  ![Tests](https://img.shields.io/badge/TESTS-220-brightgreen?style=for-the-badge)
+![Licence](https://img.shields.io/badge/LICENCE-MIT-blue?style=for-the-badge)  ![Language](https://img.shields.io/badge/LUAU-00A2FF?style=for-the-badge&logo=roblox&logoColor=white)  ![Tests](https://img.shields.io/badge/TESTS-221-brightgreen?style=for-the-badge)
 
 Refer to [LICENSE](LICENSE) for the legal bits.
 
@@ -179,7 +179,7 @@ In Studio the server uses an in-memory store, so nothing is saved between plays.
 lune run tests/run
 ```
 
-220 tests, all passing:
+221 tests, all passing:
 
 - Layout (13): bounds at each edge and rotation, overlap (touching is fine), the per-item limit, a move that overlaps only its own old cells, refusals that leave the layout untouched, uids that count up and are never reused, and a sold piece restored under its old uid.
 - Grid (9): footprint swaps, plot-local centres, flooring a point to its cell, turning and converting between plot and world, and the pivot a model is placed with.
